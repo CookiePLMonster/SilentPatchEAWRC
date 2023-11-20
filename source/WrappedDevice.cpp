@@ -6,6 +6,9 @@
 #include <filesystem>
 #include <utility>
 
+#include "shaders/Decals.h"
+#include "shaders/Paint.h"
+
 HRESULT WINAPI D3D11CreateDevice_Export(IDXGIAdapter* pAdapter, D3D_DRIVER_TYPE DriverType, HMODULE Software, UINT Flags,
 	const D3D_FEATURE_LEVEL* pFeatureLevels, UINT FeatureLevels, UINT SDKVersion, ID3D11Device** ppDevice,
 	D3D_FEATURE_LEVEL* pFeatureLevel, ID3D11DeviceContext** ppImmediateContext)
@@ -102,6 +105,21 @@ HRESULT STDMETHODCALLTYPE D3D11Device::CreateInputLayout(const D3D11_INPUT_ELEME
 
 HRESULT STDMETHODCALLTYPE D3D11Device::CreateVertexShader(const void* pShaderBytecode, SIZE_T BytecodeLength, ID3D11ClassLinkage* pClassLinkage, ID3D11VertexShader** ppVertexShader)
 {
+	if (BytecodeLength >= 4 + 16)
+	{
+		static constexpr std::array<uint32_t, 4> decalShader = { 0x428ffe45, 0x1c518347, 0xb48bed82, 0x25dc2319 };
+		static constexpr std::array<uint32_t, 4> paintShader = { 0xfae61074, 0xefbc29b0, 0xa9ec5152, 0x837d0756 };
+
+		const uint32_t* hash = reinterpret_cast<const uint32_t*>(reinterpret_cast<const uint8_t*>(pShaderBytecode) + 4);
+		if (std::equal(decalShader.begin(), decalShader.end(), hash))
+		{
+			return m_orig->CreateVertexShader(FIXED_DECAL_SHADER, sizeof(FIXED_DECAL_SHADER), pClassLinkage, ppVertexShader);
+		}
+		else if (std::equal(paintShader.begin(), paintShader.end(), hash))
+		{
+			return m_orig->CreateVertexShader(FIXED_PAINT_SHADER, sizeof(FIXED_PAINT_SHADER), pClassLinkage, ppVertexShader);
+		}
+	}
 	return m_orig->CreateVertexShader(pShaderBytecode, BytecodeLength, pClassLinkage, ppVertexShader);
 }
 
