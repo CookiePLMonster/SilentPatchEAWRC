@@ -61,7 +61,7 @@ workspace "*"
 			["Resources"] = "source/**.rc"
 	}
 
-	files { "source/*.h", "source/*.cpp", "source/resources/*.rc" }
+	files { "source/*.h", "source/*.cpp", "source/resources/*.rc", "source/*.def" }
 
 	vcpkgmanifest "on"
 
