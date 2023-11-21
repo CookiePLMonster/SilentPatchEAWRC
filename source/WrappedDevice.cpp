@@ -4,10 +4,84 @@
 
 #include <array>
 #include <filesystem>
+#include <string>
+#include <string_view>
 #include <utility>
+
+#include <wil/win32_helpers.h>
 
 #include "shaders/Decals.h"
 #include "shaders/Paint.h"
+
+#pragma comment(lib, "Version.lib")
+
+static bool IsGameUnpatched() try
+{
+	// Check for the changelist number in ProductVersion
+	// Patch 1.3.0 has a CL-901790, so if anything newer is detected, bail out
+	wil::unique_cotaskmem_string pathToGame;
+	if (FAILED(wil::GetModuleFileNameW(nullptr, pathToGame)))
+	{
+		// This failure should never happen - but if it does, don't bother the user. Meh.
+		return true;
+	}
+
+	const DWORD versionInfoSize = GetFileVersionInfoSizeW(pathToGame.get(), nullptr);
+	if (versionInfoSize == 0)
+	{
+		return true;
+	}
+
+	auto buffer = std::make_unique<std::byte[]>(versionInfoSize);
+	if (GetFileVersionInfoW(pathToGame.get(), 0, versionInfoSize, buffer.get()) == FALSE)
+	{
+		return true;
+	}
+
+	// From here, start treating failures as "future versions", since they may indicate that the future patch
+	// changed the locale or the version info format
+	wchar_t* productVersion;
+	UINT cchProductVersion;
+	if (VerQueryValueW(buffer.get(), L"\\StringFileInfo\\040904b0\\ProductVersion", reinterpret_cast<LPVOID*>(&productVersion), &cchProductVersion) == FALSE)
+	{
+		return false;
+	}
+
+	const size_t clPos = std::wstring_view(productVersion, cchProductVersion).rfind(L"CL-");
+	if (clPos == std::string_view::npos)
+	{
+		return false;
+	}
+
+	const uint32_t clNumber = std::stoul(std::wstring(productVersion + clPos + 3, productVersion + cchProductVersion));
+	return clNumber != 0 && clNumber <= 901790;
+}
+catch (...)
+{
+	return false;
+}
+
+static bool CheckIfFixNeeded() try
+{
+	if (!IsGameUnpatched())
+	{
+		MessageBoxW(nullptr, L"Patched game version detected!\n\n"
+							L"The game version is newer than the one SilentPatch was made for. This means that the decals and liveries have most likely been fixed officially, "
+							L"and this patch is no longer needed.\n\n"
+							L"Please do the following to completely remove SilentPatch:\n"
+							L"1. Remove '-dx11' from the game's launch arguments.\n"
+							L"2. Navigate to 'EA SPORTS WRC\\WRC\\Binaries\\Win64' and delete the 'd3d11.dll' file.\n\n"
+							L"SilentPatch will now deactivate to avoid any possible conflicts. This message will keep showing up until the patch is removed.",
+			L"SilentPatch", MB_OK|MB_ICONWARNING);
+
+		return false;
+	}
+	return true;
+}
+catch (...)
+{
+	return true;
+}
 
 HRESULT WINAPI D3D11CreateDevice_Export(IDXGIAdapter* pAdapter, D3D_DRIVER_TYPE DriverType, HMODULE Software, UINT Flags,
 	const D3D_FEATURE_LEVEL* pFeatureLevels, UINT FeatureLevels, UINT SDKVersion, ID3D11Device** ppDevice,
@@ -30,8 +104,17 @@ HRESULT WINAPI D3D11CreateDevice_Export(IDXGIAdapter* pAdapter, D3D_DRIVER_TYPE 
 				HRESULT hr = createFn(pAdapter, DriverType, Software, Flags, pFeatureLevels, FeatureLevels, SDKVersion, device.put(), pFeatureLevel, ppImmediateContext);
 				if (SUCCEEDED(hr))
 				{
-					wil::com_ptr_nothrow<ID3D11Device> wrappedDevice = Microsoft::WRL::Make<D3D11Device>(std::move(d3dModule), std::move(device));
-					wil::detach_to_opt_param(ppDevice, wrappedDevice);
+					static const bool bLoadTheFix = CheckIfFixNeeded();
+					if (bLoadTheFix)
+					{
+						wil::com_ptr_nothrow<ID3D11Device> wrappedDevice = Microsoft::WRL::Make<D3D11Device>(std::move(d3dModule), std::move(device));
+						wil::detach_to_opt_param(ppDevice, wrappedDevice);
+					}
+					else
+					{
+						wil::detach_to_opt_param(ppDevice, device);
+						d3dModule.release();
+					}
 				}
 				return hr;
 			}
