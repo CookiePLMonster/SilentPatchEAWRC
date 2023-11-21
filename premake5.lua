@@ -48,6 +48,7 @@ workspace "SilentPatchEAWRC"
 project "SilentPatchEAWRC"
 	kind "SharedLib"
 	language "C++"
+	targetname "d3d11"
 
 	dofile "source/VersionInfo.lua"
 
